@@ -22,13 +22,14 @@ from tensorboardX import SummaryWriter
 
 from util import config, transform
 from util.common_util import AverageMeter, intersectionAndUnionGPU, find_free_port
-from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta
+from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta, collation_fn_voxelmean_tta_custom
 from util.logger import get_logger
 from util.lr import MultiStepWithWarmup, PolyLR, PolyLRwithWarmup, Constant
 
 from util.nuscenes import nuScenes
 from util.semantic_kitti import SemanticKITTI
 from util.waymo import Waymo
+from util.semantic_custom import SemanticCustom
 
 from functools import partial
 import pickle
@@ -40,11 +41,13 @@ def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch Point Cloud Semantic Segmentation')
     parser.add_argument('--config', type=str, default='config/s3dis/s3dis_stratified_transformer.yaml', help='config file')
     parser.add_argument('opts', help='see config/s3dis/s3dis_stratified_transformer.yaml for all options', default=None, nargs=argparse.REMAINDER)
+    parser.add_argument('--save_model_output', action='store_true', default=False, help='whether to save model output')
     args = parser.parse_args()
     assert args.config is not None
     cfg = config.load_cfg_from_cfg_file(args.config)
     if args.opts is not None:
         cfg = config.merge_cfg_from_list(cfg, args.opts)
+    cfg.save_model_output = args.save_model_output
     return cfg
 
 
@@ -59,7 +62,7 @@ def main_process():
 def main():
     args = get_parser()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.train_gpu)
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.train_gpu)
     if not os.path.exists(args.save_path):
         os.makedirs(args.save_path)
     # import torch.backends.mkldnn
@@ -166,9 +169,10 @@ def main_worker(gpu, ngpus_per_node, argss):
         model = torch.nn.DataParallel(model.cuda())
 
     if main_process():
+        logger.info("gpu list: {}".format(os.environ["CUDA_VISIBLE_DEVICES"]))
         logger.info("=> creating model ...")
         logger.info("Classes: {}".format(args.classes))
-        logger.info(model)
+        # logger.info(model)
         logger.info('#Model parameters: {}'.format(sum([x.nelement() for x in model.parameters()])))
         if args.get("max_grad_norm", None):
             logger.info("args.max_grad_norm = {}".format(args.max_grad_norm))
@@ -250,6 +254,26 @@ def main_worker(gpu, ngpus_per_node, argss):
             use_tta=args.use_tta,
             vote_num=args.vote_num,
         )
+    
+    elif args.data_name == 'semantic_custom':
+        train_data = SemanticCustom(args.data_root, 
+            voxel_size=args.voxel_size, 
+            split='train', 
+            return_ref=True, 
+            label_mapping=args.label_mapping, 
+            rotate_aug=True, 
+            flip_aug=True, 
+            scale_aug=True, 
+            scale_params=[0.95,1.05], 
+            transform_aug=True, 
+            trans_std=[0.1, 0.1, 0.1],
+            ignore_label=args.ignore_label, 
+            voxel_max=args.voxel_max, 
+            xyz_norm=args.xyz_norm,
+            pc_range=args.get("pc_range", None), 
+            use_tta=args.use_tta,
+            vote_num=args.vote_num,
+        )
 
     elif args.data_name == 'waymo':
         train_data = Waymo(args.data_root, 
@@ -322,6 +346,20 @@ def main_worker(gpu, ngpus_per_node, argss):
             use_tta=args.use_tta,
             vote_num=args.vote_num,
         )
+    elif args.data_name == 'semantic_custom':
+        val_data = SemanticCustom(data_path=args.data_root,
+            label_mapping=args.label_mapping,
+            voxel_size=args.voxel_size, 
+            split='test' if args.test else 'val', 
+            rotate_aug=args.use_tta, 
+            flip_aug=args.use_tta, 
+            scale_aug=args.use_tta, 
+            transform_aug=args.use_tta, 
+            xyz_norm=args.xyz_norm, 
+            pc_range=args.get("pc_range", None), 
+            use_tta=args.use_tta,
+            vote_num=args.vote_num,
+        )
     elif args.data_name == 'waymo':
         val_data = Waymo(data_path=args.data_root, 
             voxel_size=args.voxel_size, 
@@ -353,7 +391,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             num_workers=args.workers, 
             pin_memory=True, 
             sampler=val_sampler, 
-            collate_fn=collation_fn_voxelmean_tta
+            collate_fn=collation_fn_voxelmean_tta if args.data_name != 'semantic_custom' else collation_fn_voxelmean_tta_custom
         )
     else:
         val_loader = torch.utils.data.DataLoader(val_data, 
@@ -394,7 +432,7 @@ def main_worker(gpu, ngpus_per_node, argss):
 
     if args.val:
         if args.use_tta:
-            validate_tta(val_loader, model, criterion)
+            validate_tta(val_loader, model, criterion, args)
         else:
             # validate(val_loader, model, criterion)
             validate_distance(val_loader, model, criterion)
@@ -608,7 +646,7 @@ def validate(val_loader, model, criterion):
         offset_ = offset.clone()
         offset_[1:] = offset_[1:] - offset_[:-1]
         batch = torch.cat([torch.tensor([ii]*o) for ii,o in enumerate(offset_)], 0).long()
-
+ 
         coord = torch.cat([batch.unsqueeze(-1), coord], -1)
         spatial_shape = np.clip((coord.max(0)[0][1:] + 1).numpy(), 128, None)
     
@@ -673,7 +711,7 @@ def validate(val_loader, model, criterion):
     
     return loss_meter.avg, mIoU, mAcc, allAcc
 
-def validate_tta(val_loader, model, criterion):
+def validate_tta(val_loader, model, criterion, args):
     if main_process():
         logger.info('>>>>>>>>>>>>>>>> Start Evaluation >>>>>>>>>>>>>>>>')
 
@@ -698,9 +736,12 @@ def validate_tta(val_loader, model, criterion):
             output = 0.0
             for batch_data in batch_data_list:
 
-                (coord, xyz, feat, target, offset, inds_reconstruct) = batch_data
+                if args.data_name == 'semantic_custom':
+                    (coord, xyz, feat, target, offset, inds_reconstruct, filename) = batch_data
+                else:
+                    (coord, xyz, feat, target, offset, inds_reconstruct) = batch_data
                 inds_reconstruct = inds_reconstruct.cuda(non_blocking=True)
-
+ 
                 offset_ = offset.clone()
                 offset_[1:] = offset_[1:] - offset_[:-1]
                 batch = torch.cat([torch.tensor([ii]*o) for ii,o in enumerate(offset_)], 0).long()
@@ -720,6 +761,15 @@ def validate_tta(val_loader, model, criterion):
                 
                 output = output + output_i
             output = output / len(batch_data_list)
+            
+            if (args.save_model_output):
+                output_save_path = args.save_path + "/output/"
+                if not os.path.exists(output_save_path):
+                    os.makedirs(output_save_path)
+                output_save_path = output_save_path + filename[0] + '.pt'
+                torch.save(output, output_save_path)
+                logger.info(f'save to {output_save_path}')
+                continue
             
             if loss_name == 'focal_loss':
                 loss = focal_loss(output, target, criterion.weight, args.ignore_label, args.loss_gamma)
@@ -757,6 +807,11 @@ def validate_tta(val_loader, model, criterion):
                                                           batch_time=batch_time,
                                                           loss_meter=loss_meter,
                                                           accuracy=accuracy))
+            
+    if (args.save_model_output):
+        import sys
+        logger.info("saved model output, now exit!!!!!")
+        sys.exit()
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)

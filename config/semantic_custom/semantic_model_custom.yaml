@@ -1,7 +1,7 @@
 DATA:
-  data_name: semantic_kitti
-  data_root: /root/datasets/kitti_lidarseg ## Fill in the data path 
-  label_mapping: util/semantic-kitti.yaml
+  data_name: semantic_custom
+  data_root: /root/datasets/semantic-seg ## Fill in the data path 
+  label_mapping: util/semantic-custom.yaml
   classes: 19
   fea_dim: 6
   voxel_size: [0.05, 0.05, 0.05]
@@ -36,8 +36,8 @@ TRAIN:
   grad_checkpoint_layers: []
   a: 0.0125
   loss_name: ce_loss
-  use_tta: False
-  # use_tta: True
+  use_tta: True
+  # use_tta: False
   vote_num: 4
 
   # training
@@ -49,9 +49,9 @@ TRAIN:
   power: 0.9
   use_amp: True
   train_gpu: [1] 
-  workers: 16  # data loader workers 
-  batch_size: 4 # batch size for training
-  batch_size_val: 8 # batch size for validation during training, memory and speed tradeoff
+  workers: 1  # data loader workers 
+  batch_size: 8 # batch size for training
+  batch_size_val: 1 # batch size for validation during training, memory and speed tradeoff
   base_lr: 0.006 
   epochs: 50 
   start_epoch: 0
@@ -63,15 +63,16 @@ TRAIN:
   manual_seed: 123
   print_freq: 10
   save_freq: 1
-  save_path: runs/semantic_kitti_unet32_spherical_transformer
+  save_path: runs/semantic_custom
   # weight:  # path to initial weight (default: none)
   # weight:  /root/map-volume/model_semantic_kitti.pth
-  weight:  
+  weight:  /root/iSphereFormer/runs/semantic_kitti_unet32_spherical_transformer/model/model_last.pth
   resume:  # path to latest checkpoint (default: none)
   evaluate: True  # evaluate on validation set, extra gpu memory needed and small batch_size_val is recommend
   eval_freq: 1
-  val: False
-  # val: True
+  # val: False
+  val: True
+  test: True
   
 Distributed:
   dist_url: tcp://127.0.0.1:6789

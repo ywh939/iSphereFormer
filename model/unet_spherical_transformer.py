@@ -281,9 +281,9 @@ class Semantic(nn.Module):
         :param input_map: (N), int, cuda
         '''
 
-        output = self.input_conv(input)
+        output = self.input_conv(input)#([754576, 4])
         output = self.unet(output, xyz, batch)
-        output = self.output_layer(output)
+        output = self.output_layer(output)#([12312, 32])
 
         #### semantic segmentation
         semantic_scores = self.linear(output.features)   # (N, nClass), float

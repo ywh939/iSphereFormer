@@ -88,6 +88,38 @@ def collation_fn_voxelmean_tta(batch_list):
 
     return samples
 
+def collation_fn_voxelmean_tta_custom(batch_list):
+    """
+    :param batch:
+    :return:   coords_batch: N x 4 (x,y,z,batch)
+
+    """
+    samples = []
+    batch_list = list(zip(*batch_list))
+
+    for batch in batch_list:
+        coords, xyz, feats, labels, inds_recons, filename = list(zip(*batch))
+        inds_recons = list(inds_recons)
+
+        accmulate_points_num = 0
+        offset = []
+        for i in range(len(coords)):
+            inds_recons[i] = accmulate_points_num + inds_recons[i]
+            accmulate_points_num += coords[i].shape[0]
+            offset.append(accmulate_points_num)
+
+        coords = torch.cat(coords)
+        xyz = torch.cat(xyz)
+        feats = torch.cat(feats)
+        labels = torch.cat(labels)
+        offset = torch.IntTensor(offset)
+        inds_recons = torch.cat(inds_recons)
+
+        sample = (coords, xyz, feats, labels, offset, inds_recons, filename)
+        samples.append(sample)
+
+    return samples
+
 def data_prepare(coord, feat, label, split='train', voxel_size=np.array([0.1, 0.1, 0.1]), voxel_max=None, transform=None, xyz_norm=False):
     if transform:
         # coord, feat, label = transform(coord, feat, label)
