@@ -173,7 +173,7 @@ class UBlock(nn.Module):
 
         assert (inp.indices[:, 0] == batch).all()
         
-        output = self.blocks(inp)
+        output = self.blocks(inp)# /kitti:[372990, 32], 2:([247118, 64]), 3:[133399, 128], 4:[60139, 256], 5:[23102, 256]
 
         # transformer
         if self.indice_key_id in self.sphere_layers:
@@ -182,22 +182,22 @@ class UBlock(nn.Module):
                     return self.transformer_block(feats_, xyz_, batch_)
                 transformer_features = torch.utils.checkpoint.checkpoint(run, output.features, xyz, batch)
             else:
-                transformer_features = self.transformer_block(output.features, xyz, batch)
+                transformer_features = self.transformer_block(output.features, xyz, batch) # kitti:[372990, 32], 2:[247118, 64], 3:[133399, 128], 4:[60139, 256], 5:[23102, 256]
             output = output.replace_feature(transformer_features)
 
         identity = spconv.SparseConvTensor(output.features, output.indices, output.spatial_shape, output.batch_size)
 
         if len(self.nPlanes) > 1:
-            output_decoder = self.conv(output)
+            output_decoder = self.conv(output)# /kitti: ([247118, 64]), 2:[133399, 128], 3:[60139, 256], 4:[23102, 256], 5:[23102, 256]
 
             # downsample
             indice_pairs = output_decoder.indice_dict['spconv{}'.format(self.indice_key_id)].indice_pairs
             xyz_next, batch_next = get_downsample_info(xyz, batch, indice_pairs)
 
             output_decoder = self.u(output_decoder, xyz_next, batch_next.long())
-            output_decoder = self.deconv(output_decoder)
-            output = output.replace_feature(torch.cat((identity.features, output_decoder.features), dim=1))
-            output = self.blocks_tail(output)
+            output_decoder = self.deconv(output_decoder)# kitti: 5:[60139, 256],4:[133399, 128],3:[247118, 64],2:[372990, 32]
+            output = output.replace_feature(torch.cat((identity.features, output_decoder.features), dim=1)) # kitti: 5:[60139, 512],4:[133399, 256],3:[247118, 128],2:[372990, 64]
+            output = self.blocks_tail(output) # kitti: 4:[133399, 128],3:[247118, 64],2:[372990, 32]
 
         return output
 
@@ -276,16 +276,16 @@ class Semantic(nn.Module):
             m.bias.data.fill_(0.0)
 
 
-    def forward(self, input, xyz, batch):
+    def forward(self, input, xyz, batch):# kitti:[372990, 4],[372990, 3],[372990]
         '''
         :param input_map: (N), int, cuda
         '''
 
-        output = self.input_conv(input)#([754576, 4])
-        output = self.unet(output, xyz, batch)
-        output = self.output_layer(output)#([12312, 32])
+        output = self.input_conv(input)#([754576, 4]) /kitti:output.features.shape=[372990, 32]
+        output = self.unet(output, xyz, batch)# /kitti:output.features.shape=[372990, 32]
+        output = self.output_layer(output)#([12312, 32]) /kitti:output.features.shape=[372990, 32]
 
         #### semantic segmentation
-        semantic_scores = self.linear(output.features)   # (N, nClass), float
+        semantic_scores = self.linear(output.features)   # (N, nClass), float /kitti:[372990, 19]
         return semantic_scores
 
