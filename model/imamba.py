@@ -207,10 +207,9 @@ class MixerModel(nn.Module):
             for i, layer in enumerate(self.layers)
         }
 
-    def forward(self, input_ids, pos, inference_params=None):
+    def forward(self, input_ids, inference_params=None):
         hidden_states = input_ids  # + pos [32, 192, 384]
         residual = None
-        hidden_states = hidden_states + pos
         for layer in self.layers:
             hidden_states, residual = layer(
                 hidden_states, residual, inference_params=inference_params

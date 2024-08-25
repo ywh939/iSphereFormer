@@ -48,6 +48,7 @@ class SemanticKITTI(torch.utils.data.Dataset):
         pc_range=None, 
         use_tta=None,
         vote_num=4,
+        tempo_sample_num=1
     ):
         super().__init__()
         self.num_classes = 19
@@ -71,6 +72,8 @@ class SemanticKITTI(torch.utils.data.Dataset):
         self.elastic_gran, self.elastic_mag = elastic_params[0], elastic_params[1]
         self.use_tta = use_tta
         self.vote_num = vote_num
+
+        self.tempo_sample_num = tempo_sample_num
 
         if split == 'train':
             splits = semkittiyaml['split']['train']
@@ -104,6 +107,24 @@ class SemanticKITTI(torch.utils.data.Dataset):
                 samples.append(sample)
             return tuple(samples)
         return self.get_single_sample(index)
+    
+    def get_tempo_samples(self, index):
+        sample_list = []
+        labels_list = []
+        for idx in range(index - 1, index - self.tempo_sample_num,  -1):
+            file_path = self.files[idx]
+            raw_data = np.fromfile(file_path, dtype=np.float32).reshape((-1, 4))
+            sample_list.append(raw_data[:, :4])
+
+            annotated_data = np.fromfile(file_path.replace('velodyne', 'labels')[:-3] + 'label',
+                                        dtype=np.uint32).reshape((-1, 1))
+            annotated_data = annotated_data & 0xFFFF  # delete high 16 digits binary
+            annotated_data = np.vectorize(self.learning_map.__getitem__)(annotated_data)
+            annotated_data = annotated_data - 1
+            labels_in = annotated_data.astype(np.uint8).reshape(-1)
+            labels_list.append(labels_in)
+
+        return sample_list, labels_list
 
     def get_single_sample(self, index, vote_idx=0):
 
@@ -118,7 +139,7 @@ class SemanticKITTI(torch.utils.data.Dataset):
         points = raw_data[:, :4]
 
         if self.split != 'test':
-            annotated_data[annotated_data == 0] = self.ignore_label + 1
+            # annotated_data[annotated_data == 0] = self.ignore_label + 1
             annotated_data = annotated_data - 1
             labels_in = annotated_data.astype(np.uint8).reshape(-1)
         else:
@@ -170,7 +191,23 @@ class SemanticKITTI(torch.utils.data.Dataset):
 
         if self.split == 'train':
             coords, xyz, feats, labels = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
-            return coords, xyz, feats, labels
+
+            if self.tempo_sample_num > 1:
+                tempo_samples, tempo_labels = self.get_tempo_samples(index)
+                sample_info = { 'index' : index, 'coords' : coords, 'xyz' : xyz, 'feats' : feats, 'labels' : labels }
+                tempo_feats = [sample_info]
+                for idx in range(0, len(tempo_samples)):
+                    sample_info = { 'index': idx }
+                    t_coords, t_xyz, t_feats, t_labels = data_prepare(tempo_samples[idx][:, :3], tempo_samples[idx], tempo_labels[idx], self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
+                    sample_info['coords'] = t_coords
+                    sample_info['xyz'] = t_xyz
+                    sample_info['feats'] = t_feats
+                    sample_info['labels'] = t_labels
+                    tempo_feats.append(sample_info)
+
+                return coords, xyz, feats, labels, tempo_feats
+            else:
+                return coords, xyz, feats, labels
         else:
             coords, xyz, feats, labels, inds_reconstruct = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
             if self.split == 'val':

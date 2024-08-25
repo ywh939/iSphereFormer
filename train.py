@@ -22,7 +22,7 @@ from tensorboardX import SummaryWriter
 
 from util import config, transform
 from util.common_util import AverageMeter, intersectionAndUnionGPU, find_free_port
-from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta, collation_fn_voxelmean_tta_custom
+from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta, collation_fn_voxelmean_tta_custom, collate_fn_tempo
 from util.logger import get_logger
 from util.lr import MultiStepWithWarmup, PolyLR, PolyLRwithWarmup, Constant
 
@@ -32,9 +32,6 @@ from util.waymo import Waymo
 from util.semantic_custom import SemanticCustom
 
 from functools import partial
-import pickle
-import yaml
-from torch_scatter import scatter_mean
 import spconv.pytorch as spconv
 
 def get_parser():
@@ -42,12 +39,14 @@ def get_parser():
     parser.add_argument('--config', type=str, default='config/s3dis/s3dis_stratified_transformer.yaml', help='config file')
     parser.add_argument('opts', help='see config/s3dis/s3dis_stratified_transformer.yaml for all options', default=None, nargs=argparse.REMAINDER)
     parser.add_argument('--save_model_output', action='store_true', default=False, help='whether to save model output')
+    parser.add_argument('--open_tempo', action='store_true', default=False, help='whether to open temporal model')
     args = parser.parse_args()
     assert args.config is not None
     cfg = config.load_cfg_from_cfg_file(args.config)
     if args.opts is not None:
         cfg = config.merge_cfg_from_list(cfg, args.opts)
     cfg.save_model_output = args.save_model_output
+    cfg.open_tempo = args.open_tempo
     return cfg
 
 
@@ -130,7 +129,8 @@ def main_worker(gpu, ngpus_per_node, argss):
             grad_checkpoint_layers=args.grad_checkpoint_layers, 
             sphere_layers=args.sphere_layers,
             a=args.a,
-        )
+            open_tempo=args.open_tempo
+        ).float()
     else:
         raise Exception('architecture {} not supported yet'.format(args.arch))
     
@@ -141,13 +141,13 @@ def main_worker(gpu, ngpus_per_node, argss):
             "lr": args.base_lr,
             "weight_decay": args.weight_decay,
         },
-        {
-            "params": [p for n, p in model.named_parameters() if "transformer_block" in n and p.requires_grad],
-            "lr": args.base_lr * args.transformer_lr_scale,
-            "weight_decay": args.weight_decay,
-        },
+        # {
+        #     "params": [p for n, p in model.named_parameters() if "transformer_block" in n and p.requires_grad],
+        #     "lr": args.base_lr * args.transformer_lr_scale,
+        #     "weight_decay": args.weight_decay,
+        # },
     ]
-    optimizer = torch.optim.AdamW(param_dicts, lr=args.base_lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.AdamW(param_dicts, lr=args.base_lr, eps=1e-3, weight_decay=args.weight_decay)
 
     if main_process():
         global logger, writer
@@ -239,11 +239,18 @@ def main_worker(gpu, ngpus_per_node, argss):
             split='train', 
             return_ref=True, 
             label_mapping=args.label_mapping, 
-            rotate_aug=True, 
-            flip_aug=True, 
-            scale_aug=True, 
+
+            rotate_aug=args.use_tta, 
+            flip_aug=args.use_tta, 
+            scale_aug=args.use_tta, 
+            transform_aug=args.use_tta, 
+
+            # rotate_aug=True, 
+            # flip_aug=True, 
+            # scale_aug=True, 
+            # transform_aug=True, 
+
             scale_params=[0.95,1.05], 
-            transform_aug=True, 
             trans_std=[0.1, 0.1, 0.1],
             elastic_aug=False, 
             elastic_params=[[0.12, 0.4], [0.8, 3.2]], 
@@ -253,6 +260,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             pc_range=args.get("pc_range", None), 
             use_tta=args.use_tta,
             vote_num=args.vote_num,
+            tempo_sample_num=args.tempo_sample_num
         )
     
     elif args.data_name == 'semantic_custom':
@@ -306,10 +314,11 @@ def main_worker(gpu, ngpus_per_node, argss):
     else:
         train_sampler = None
 
-    collate_fn = partial(collate_fn_limit, max_batch_points=args.max_batch_points, logger=logger if main_process() else None)
+    collate_fn = partial(collate_fn_limit if args.tempo_sample_num == 1 else collate_fn_tempo, max_batch_points=args.max_batch_points, logger=logger if main_process() else None)
     train_loader = torch.utils.data.DataLoader(train_data, 
         batch_size=args.batch_size, 
-        shuffle=(train_sampler is None), 
+        # shuffle=False if args.open_tempo else (train_sampler is None), 
+        shuffle=True, 
         num_workers=args.workers,
         pin_memory=True, 
         sampler=train_sampler, 
@@ -495,6 +504,23 @@ def focal_loss(output, target, class_weight, ignore_label, gamma, need_softmax=T
     loss = -(class_weight_per_sample * focal_weight_per_sample * torch.log(p_t + eps)).sum() / (class_weight_per_sample.sum() + eps)
     return loss
 
+def pre_process_data(tempo_data):
+            
+    for batch_data in tempo_data:
+        for unit_data in batch_data:
+            coord, xyz, feat = unit_data['coords'], unit_data['xyz'], unit_data['feats']
+
+            batch = torch.Tensor([0]*xyz.shape[0]).long()
+
+            coord = torch.cat([batch.unsqueeze(-1), coord], -1)
+            coord[:, 1:] += (torch.rand(3) * 2).type_as(coord)
+            spatial_shape = np.clip((coord.max(0)[0][1:] + 1).numpy(), 128, None)
+        
+            coord, feat = coord.cuda(non_blocking=True), feat.cuda(non_blocking=True)
+            s_feat = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, 1)
+            unit_data['new_coords'] = coord
+            unit_data['spconv_feat'] = s_feat
+
 
 def train(train_loader, model, criterion, optimizer, epoch, scaler, scheduler, gpu):
     
@@ -515,7 +541,11 @@ def train(train_loader, model, criterion, optimizer, epoch, scaler, scheduler, g
         data_time.update(time.time() - end)
         torch.cuda.empty_cache()
         
-        coord, xyz, feat, target, offset = batch_data
+        if args.tempo_sample_num > 1:
+            coord, xyz, feat, target, offset, tempo_feats = batch_data
+        else:
+            coord, xyz, feat, target, offset = batch_data
+            
         offset_ = offset.clone()
         offset_[1:] = offset_[1:] - offset_[:-1]
         batch = torch.cat([torch.tensor([ii]*o) for ii,o in enumerate(offset_)], 0).long()
@@ -529,11 +559,16 @@ def train(train_loader, model, criterion, optimizer, epoch, scaler, scheduler, g
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size)
 
         assert batch.shape[0] == feat.shape[0]
-        
+        pre_process_data(tempo_data=tempo_feats)
         use_amp = args.use_amp
         with torch.cuda.amp.autocast(enabled=use_amp):
-            
-            output = model(sinput, xyz, batch)
+            # Trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            # print(f'Trainable params: {Trainable_params/ 1e6}M')
+
+            if args.tempo_sample_num > 1:
+                output = model(sinput, xyz, batch, tempo_feats)
+            else:
+                output = model(sinput, xyz, batch)
             assert output.shape[1] == args.classes
 
             if target.shape[-1] == 1:

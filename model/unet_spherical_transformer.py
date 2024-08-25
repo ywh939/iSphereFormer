@@ -9,6 +9,8 @@ from spconv.core import ConvAlgo
 from collections import OrderedDict
 from torch_scatter import scatter_mean
 from model.spherical_transformer import SphereFormer
+from .imamba import MixerModel
+from .tempo_embedding import GatedTempoClueEncoder
 
 class ResidualBlock(SparseModule):
     def __init__(self, in_channels, out_channels, norm_fn, indice_key=None):
@@ -78,10 +80,12 @@ class UBlock(nn.Module):
         grad_checkpoint_layers=[], 
         sphere_layers=[1,2,3,4,5],
         a=0.05*0.25,
+        open_tempo=False
     ):
 
         super().__init__()
-
+        
+        self.open_tempo = open_tempo
         self.nPlanes = nPlanes
         self.indice_key_id = indice_key_id
         self.grad_checkpoint_layers = grad_checkpoint_layers
@@ -95,20 +99,27 @@ class UBlock(nn.Module):
             self.window_size = window_size
             self.window_size_sphere = window_size_sphere
             num_heads = nPlanes[0] // head_dim
-            self.transformer_block = SphereFormer(
-                nPlanes[0], 
-                num_heads, 
-                window_size, 
-                window_size_sphere, 
-                quant_size, 
-                quant_size_sphere,
-                indice_key='sphereformer{}'.format(indice_key_id),
-                rel_query=rel_query, 
-                rel_key=rel_key, 
-                rel_value=rel_value, 
-                drop_path=drop_path[0],
-                a=a,
-            )
+
+            if (open_tempo):
+                self.mamba_blocks = MixerModel(d_model=nPlanes[0],
+                                n_layer=1,
+                                # drop_path=0.1)
+                                drop_path=0.3)
+            else:
+                self.transformer_block = SphereFormer(
+                    nPlanes[0], 
+                    num_heads, 
+                    window_size, 
+                    window_size_sphere, 
+                    quant_size, 
+                    quant_size_sphere,
+                    indice_key='sphereformer{}'.format(indice_key_id),
+                    rel_query=rel_query, 
+                    rel_key=rel_key, 
+                    rel_value=rel_value, 
+                    drop_path=drop_path[0],
+                    a=a,
+                )
 
         if len(nPlanes) > 1:
             self.conv = spconv.SparseSequential(
@@ -154,7 +165,8 @@ class UBlock(nn.Module):
                 indice_key_id=indice_key_id+1, 
                 grad_checkpoint_layers=grad_checkpoint_layers, 
                 sphere_layers=sphere_layers,
-                a=a
+                a=a,
+                open_tempo=open_tempo
             )
 
             self.deconv = spconv.SparseSequential(
@@ -182,7 +194,12 @@ class UBlock(nn.Module):
                     return self.transformer_block(feats_, xyz_, batch_)
                 transformer_features = torch.utils.checkpoint.checkpoint(run, output.features, xyz, batch)
             else:
-                transformer_features = self.transformer_block(output.features, xyz, batch) # kitti:[372990, 32], 2:[247118, 64], 3:[133399, 128], 4:[60139, 256], 5:[23102, 256]
+                if self.open_tempo:
+                    mamba_input = torch.unsqueeze(output.features, dim=0)
+                    mamba_output = self.mamba_blocks(mamba_input) # kitti:[372990, 32], 2:[247118, 64], 3:[133399, 128], 4:[60139, 256], 5:[23102, 256]
+                    transformer_features = torch.squeeze(mamba_output, dim=0)
+                else:
+                    transformer_features = self.transformer_block(output.features, xyz, batch) # kitti:[372990, 32], 2:[247118, 64], 3:[133399, 128], 4:[60139, 256], 5:[23102, 256]
             output = output.replace_feature(transformer_features)
 
         identity = spconv.SparseConvTensor(output.features, output.indices, output.spatial_shape, output.batch_size)
@@ -222,6 +239,7 @@ class Semantic(nn.Module):
         grad_checkpoint_layers=[], 
         sphere_layers=[1,2,3,4,5],
         a=0.05*0.25,
+        open_tempo=False
     ):
         super().__init__()
 
@@ -234,10 +252,16 @@ class Semantic(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, 7)]
 
+        float32type = torch.float32
+
         #### backbone
         self.input_conv = spconv.SparseSequential(
-            spconv.SubMConv3d(input_c, m, kernel_size=3, padding=1, bias=False, indice_key='subm1')
+            spconv.SubMConv3d(input_c, m, kernel_size=3, padding=1, bias=False, indice_key='subm1'),
+            norm_fn(m),
+            nn.ReLU(),
         )
+
+        self.tempoEncoder = GatedTempoClueEncoder(input_channel=input_c, middle_channel=m)
 
         self.unet = UBlock(layers, 
             norm_fn, 
@@ -256,6 +280,7 @@ class Semantic(nn.Module):
             grad_checkpoint_layers=grad_checkpoint_layers, 
             sphere_layers=sphere_layers,
             a=a,
+            open_tempo=open_tempo
         )
 
         self.output_layer = spconv.SparseSequential(
@@ -276,12 +301,14 @@ class Semantic(nn.Module):
             m.bias.data.fill_(0.0)
 
 
-    def forward(self, input, xyz, batch):# kitti:[372990, 4],[372990, 3],[372990]
+    def forward(self, input, xyz, batch, tempo_input=None):# kitti:[372990, 4],[372990, 3],[372990]
         '''
         :param input_map: (N), int, cuda
         '''
-
-        output = self.input_conv(input)#([754576, 4]) /kitti:output.features.shape=[372990, 32]
+        if tempo_input:
+            output = self.tempoEncoder(input, tempo_input)
+        else:
+            output = self.input_conv(input)#([754576, 4]) /kitti:output.features.shape=[372990, 32]
         output = self.unet(output, xyz, batch)# /kitti:output.features.shape=[372990, 32]
         output = self.output_layer(output)#([12312, 32]) /kitti:output.features.shape=[372990, 32]
 

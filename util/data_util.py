@@ -29,6 +29,34 @@ def collate_fn_limit(batch, max_batch_points, logger):
         logger.warning("batch_size shortened from {} to {}, points from {} to {}".format(len(batch), k, s, s_now))
 
     return torch.cat(new_coord[:k]), torch.cat(new_xyz[:k]), torch.cat(new_feat[:k]), torch.cat(new_label[:k]), torch.IntTensor(offset[:k])
+
+def collate_fn_tempo(batch, max_batch_points, logger):
+    coord, xyz, feat, label, tempo_feats = list(zip(*batch))
+    offset, count = [], 0
+    
+    new_coord, new_xyz, new_feat, new_label, new_tempo_feats = [], [], [], [], []
+    k = 0
+    for i, item in enumerate(xyz):
+
+        count += item.shape[0]
+        # print(item.shape[0])
+        if count > max_batch_points:
+            break
+
+        k += 1
+        offset.append(count)
+        new_coord.append(coord[i])
+        new_xyz.append(xyz[i])
+        new_feat.append(feat[i])
+        new_label.append(label[i])
+        new_tempo_feats.append(tempo_feats[i])
+
+    if logger is not None and k < len(batch):
+        s = sum([x.shape[0] for x in xyz])
+        s_now = sum([x.shape[0] for x in new_xyz[:k]])
+        logger.warning("batch_size shortened from {} to {}, points from {} to {}".format(len(batch), k, s, s_now))
+
+    return torch.cat(new_coord[:k]), torch.cat(new_xyz[:k]), torch.cat(new_feat[:k]), torch.cat(new_label[:k]), torch.IntTensor(offset[:k]), new_tempo_feats[:k]
     
 
 def collation_fn_voxelmean(batch):
