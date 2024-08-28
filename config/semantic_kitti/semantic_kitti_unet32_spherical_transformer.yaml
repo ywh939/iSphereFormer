@@ -49,10 +49,12 @@ TRAIN:
   power: 0.9
   use_amp: True
   train_gpu: [1] 
+  # workers: 1  # data loader workers 
   workers: 16  # data loader workers 
   batch_size: 4 # batch size for training
+  # batch_size: 1 # batch size for training
   batch_size_val: 8 # batch size for validation during training, memory and speed tradeoff
-  base_lr: 0.006 
+  base_lr: 0.0003 
   epochs: 50 
   start_epoch: 0
   momentum: 0.9
@@ -63,11 +65,13 @@ TRAIN:
   manual_seed: 123
   print_freq: 10
   save_freq: 1
-  save_path: runs/semantic_kitti_unet32_spherical_transformer
+  # save_path: runs/semantic_kitti_unet32_mamba_reshuffle_oneBlock_noaug_
+  save_path: runs/semantic_kitti_unet32_mamba_reshuffle_oneBlock_noaug_tempo
   # weight:  # path to initial weight (default: none)
   # weight:  /root/map-volume/model_semantic_kitti.pth
   weight:  
   resume:  # path to latest checkpoint (default: none)
+  # resume:  /root/iSphereFormer/runs/semantic_kitti_unet32_mamba_reshuffle_oneBlock_noaug/model/model_last.pth
   evaluate: True  # evaluate on validation set, extra gpu memory needed and small batch_size_val is recommend
   eval_freq: 1
   val: False

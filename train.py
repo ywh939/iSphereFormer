@@ -22,7 +22,7 @@ from tensorboardX import SummaryWriter
 
 from util import config, transform
 from util.common_util import AverageMeter, intersectionAndUnionGPU, find_free_port
-from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta, collation_fn_voxelmean_tta_custom, collate_fn_tempo
+from util.data_util import collate_fn_limit, collation_fn_voxelmean, collation_fn_voxelmean_tta, collation_fn_voxelmean_tta_custom, collate_fn_tempo, collation_fn_voxelmean_tempo
 from util.logger import get_logger
 from util.lr import MultiStepWithWarmup, PolyLR, PolyLRwithWarmup, Constant
 
@@ -346,6 +346,7 @@ def main_worker(gpu, ngpus_per_node, argss):
         val_data = SemanticKITTI(data_path=args.data_root, 
             voxel_size=args.voxel_size, 
             split='val', 
+            label_mapping=args.label_mapping, 
             rotate_aug=args.use_tta, 
             flip_aug=args.use_tta, 
             scale_aug=args.use_tta, 
@@ -354,6 +355,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             pc_range=args.get("pc_range", None), 
             use_tta=args.use_tta,
             vote_num=args.vote_num,
+            tempo_sample_num=args.tempo_sample_num
         )
     elif args.data_name == 'semantic_custom':
         val_data = SemanticCustom(data_path=args.data_root,
@@ -409,7 +411,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             num_workers=args.workers,
             pin_memory=True, 
             sampler=val_sampler, 
-            collate_fn=collation_fn_voxelmean
+            collate_fn=collation_fn_voxelmean if args.tempo_sample_num == 1 else collation_fn_voxelmean_tempo
         )
 
     # set scheduler
@@ -443,8 +445,8 @@ def main_worker(gpu, ngpus_per_node, argss):
         if args.use_tta:
             validate_tta(val_loader, model, criterion, args)
         else:
-            # validate(val_loader, model, criterion)
-            validate_distance(val_loader, model, criterion)
+            validate(val_loader, model, criterion)
+            # validate_distance(val_loader, model, criterion)
         exit()
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -675,7 +677,10 @@ def validate(val_loader, model, criterion):
 
         data_time.update(time.time() - end)
     
-        (coord, xyz, feat, target, offset, inds_reconstruct) = batch_data
+        if args.tempo_sample_num > 1:
+            (coord, xyz, feat, target, offset, inds_reconstruct, tempo_data) = batch_data
+        else:
+            (coord, xyz, feat, target, offset, inds_reconstruct) = batch_data
         inds_reconstruct = inds_reconstruct.cuda(non_blocking=True)
 
         offset_ = offset.clone()
@@ -691,9 +696,13 @@ def validate(val_loader, model, criterion):
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size_val)
 
         assert batch.shape[0] == feat.shape[0]
+        pre_process_data(tempo_data)
         
         with torch.no_grad():
-            output = model(sinput, xyz, batch)
+            if args.tempo_sample_num > 1:
+                output = model(sinput, xyz, batch, tempo_data)
+            else:
+                output = model(sinput, xyz, batch)
             output = output[inds_reconstruct, :]
         
             if loss_name == 'focal_loss':

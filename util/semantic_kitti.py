@@ -33,7 +33,7 @@ class SemanticKITTI(torch.utils.data.Dataset):
         voxel_size=[0.1, 0.1, 0.1], 
         split='train', 
         return_ref=True, 
-        label_mapping="util/semantic-kitti.yaml", 
+        label_mapping="", 
         rotate_aug=True, 
         flip_aug=True, 
         scale_aug=True, 
@@ -108,13 +108,22 @@ class SemanticKITTI(torch.utils.data.Dataset):
             return tuple(samples)
         return self.get_single_sample(index)
     
-    def get_tempo_samples(self, index):
-        sample_list = []
-        labels_list = []
+    def get_tempo_samples(self, index, cur_coords, cur_xyz, cur_feats, cur_labels):
+        cur_sample_info = {'index' : index, 
+                       'coords' : cur_coords, 
+                       'xyz' : cur_xyz, 
+                       'feats' : cur_feats, 
+                       'labels' : cur_labels}
+        
+        tempo_feats = [cur_sample_info]
+
         for idx in range(index - 1, index - self.tempo_sample_num,  -1):
+            if (idx < 0):
+                tempo_feats.append(cur_sample_info)
+                continue
+
             file_path = self.files[idx]
             raw_data = np.fromfile(file_path, dtype=np.float32).reshape((-1, 4))
-            sample_list.append(raw_data[:, :4])
 
             annotated_data = np.fromfile(file_path.replace('velodyne', 'labels')[:-3] + 'label',
                                         dtype=np.uint32).reshape((-1, 1))
@@ -122,9 +131,19 @@ class SemanticKITTI(torch.utils.data.Dataset):
             annotated_data = np.vectorize(self.learning_map.__getitem__)(annotated_data)
             annotated_data = annotated_data - 1
             labels_in = annotated_data.astype(np.uint8).reshape(-1)
-            labels_list.append(labels_in)
 
-        return sample_list, labels_list
+            sample_info = { 'index': idx }
+            if self.split == 'train':
+                t_coords, t_xyz, t_feats, t_labels = data_prepare(raw_data[:, :3], raw_data[:, :4], labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
+            else:
+                t_coords, t_xyz, t_feats, t_labels, _ = data_prepare(raw_data[:, :3], raw_data[:, :4], labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
+            sample_info['coords'] = t_coords
+            sample_info['xyz'] = t_xyz
+            sample_info['feats'] = t_feats
+            sample_info['labels'] = t_labels
+            tempo_feats.append(sample_info)
+
+        return tempo_feats
 
     def get_single_sample(self, index, vote_idx=0):
 
@@ -193,24 +212,17 @@ class SemanticKITTI(torch.utils.data.Dataset):
             coords, xyz, feats, labels = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
 
             if self.tempo_sample_num > 1:
-                tempo_samples, tempo_labels = self.get_tempo_samples(index)
-                sample_info = { 'index' : index, 'coords' : coords, 'xyz' : xyz, 'feats' : feats, 'labels' : labels }
-                tempo_feats = [sample_info]
-                for idx in range(0, len(tempo_samples)):
-                    sample_info = { 'index': idx }
-                    t_coords, t_xyz, t_feats, t_labels = data_prepare(tempo_samples[idx][:, :3], tempo_samples[idx], tempo_labels[idx], self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
-                    sample_info['coords'] = t_coords
-                    sample_info['xyz'] = t_xyz
-                    sample_info['feats'] = t_feats
-                    sample_info['labels'] = t_labels
-                    tempo_feats.append(sample_info)
-
-                return coords, xyz, feats, labels, tempo_feats
+                tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
+                return coords, xyz, feats, labels, tempo_data
             else:
                 return coords, xyz, feats, labels
         else:
             coords, xyz, feats, labels, inds_reconstruct = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
             if self.split == 'val':
-                return coords, xyz, feats, labels, inds_reconstruct
+                if self.tempo_sample_num > 1:
+                    tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
+                    return coords, xyz, feats, labels, inds_reconstruct, tempo_data
+                else:
+                    return coords, xyz, feats, labels, inds_reconstruct
             elif self.split == 'test':
                 return coords, xyz, feats, labels, inds_reconstruct, self.files[index]

@@ -3,6 +3,7 @@ import torch.nn as nn
 import functools
 
 import spconv.pytorch as spconv
+from .imamba import MixerModel
 
 
 class GatedUnit(nn.Module):
@@ -24,9 +25,18 @@ class TempoEmbedding(nn.Module):
         self.bn = nn.BatchNorm1d(output_channel)
         self.act = nn.GELU()
 
+        self.mamba_blocks = MixerModel(d_model=output_channel,
+                n_layer=1,
+                # drop_path=0.1)
+                drop_path=0.3)
+
     def forward(self, x):
         x = self.act(self.bn(self.fc1(x)))
-        x = self.act(self.bn(self.fc2(x)))
+        # x = self.act(self.bn(self.fc2(x)))
+
+        mamba_input = torch.unsqueeze(x, dim=0)
+        mamba_output = self.mamba_blocks(mamba_input)
+        x = torch.squeeze(mamba_output, dim=0)
         return x
 
 class GatedTempoClueEncoder(nn.Module):
@@ -53,7 +63,7 @@ class GatedTempoClueEncoder(nn.Module):
             
             sequence_feat_list = []
             cur_spconv_feat = self.input_conv(batch_data[0]['spconv_feat'])
-            sequence_feat_list.append(cur_spconv_feat.features)
+            sequence_feat_list.append(cur_frame.features)
 
             for frame in batch_data[1:]:
                 frame['post_spconv_feat'] = self.input_conv(frame['spconv_feat'])
@@ -73,5 +83,6 @@ class GatedTempoClueEncoder(nn.Module):
 
             all_feat.append(batch_data[0]['post_spconv_feat'])
         
-        cur_frame.replace_feature(torch.cat(all_feat))
+        fusion_feat = cur_frame.features + torch.cat(all_feat)
+        cur_frame.replace_feature(fusion_feat)
         return cur_frame

@@ -31,10 +31,10 @@ def collate_fn_limit(batch, max_batch_points, logger):
     return torch.cat(new_coord[:k]), torch.cat(new_xyz[:k]), torch.cat(new_feat[:k]), torch.cat(new_label[:k]), torch.IntTensor(offset[:k])
 
 def collate_fn_tempo(batch, max_batch_points, logger):
-    coord, xyz, feat, label, tempo_feats = list(zip(*batch))
+    coord, xyz, feat, label, tempo_data = list(zip(*batch))
     offset, count = [], 0
     
-    new_coord, new_xyz, new_feat, new_label, new_tempo_feats = [], [], [], [], []
+    new_coord, new_xyz, new_feat, new_label, new_tempo_data = [], [], [], [], []
     k = 0
     for i, item in enumerate(xyz):
 
@@ -49,15 +49,40 @@ def collate_fn_tempo(batch, max_batch_points, logger):
         new_xyz.append(xyz[i])
         new_feat.append(feat[i])
         new_label.append(label[i])
-        new_tempo_feats.append(tempo_feats[i])
+        new_tempo_data.append(tempo_data[i])
 
     if logger is not None and k < len(batch):
         s = sum([x.shape[0] for x in xyz])
         s_now = sum([x.shape[0] for x in new_xyz[:k]])
         logger.warning("batch_size shortened from {} to {}, points from {} to {}".format(len(batch), k, s, s_now))
 
-    return torch.cat(new_coord[:k]), torch.cat(new_xyz[:k]), torch.cat(new_feat[:k]), torch.cat(new_label[:k]), torch.IntTensor(offset[:k]), new_tempo_feats[:k]
+    return torch.cat(new_coord[:k]), torch.cat(new_xyz[:k]), torch.cat(new_feat[:k]), torch.cat(new_label[:k]), torch.IntTensor(offset[:k]), new_tempo_data[:k]
     
+
+def collation_fn_voxelmean_tempo(batch):
+    """
+    :param batch:
+    :return:   coords_batch: N x 4 (x,y,z,batch)
+
+    """
+    coords, xyz, feats, labels, inds_recons, tempo_data = list(zip(*batch))
+    inds_recons = list(inds_recons)
+
+    accmulate_points_num = 0
+    offset = []
+    for i in range(len(coords)):
+        inds_recons[i] = accmulate_points_num + inds_recons[i]
+        accmulate_points_num += coords[i].shape[0]
+        offset.append(accmulate_points_num)
+
+    coords = torch.cat(coords)
+    xyz = torch.cat(xyz)
+    feats = torch.cat(feats)
+    labels = torch.cat(labels)
+    offset = torch.IntTensor(offset)
+    inds_recons = torch.cat(inds_recons)
+
+    return coords, xyz, feats, labels, offset, inds_recons, tempo_data
 
 def collation_fn_voxelmean(batch):
     """
