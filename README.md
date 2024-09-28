@@ -21,7 +21,8 @@ cd mamba
 git checkout v1.1.4 
 MAMBA_FORCE_BUILD=TRUE pip install .
 
-pip install -f requirement.txt 
+cd iSphereFormer
+pip install -r requirement.txt 
 or
 conda env create -f environment.yml
 ```
