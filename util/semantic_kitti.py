@@ -117,9 +117,9 @@ class SemanticKITTI(torch.utils.data.Dataset):
         
         tempo_feats = [cur_sample_info]
 
-        for idx in range(index - 1, index - self.tempo_sample_num,  -1):
+        for idx in range(index - 1, index - self.tempo_sample_num, -1):
             if (idx < 0):
-                tempo_feats.append(cur_sample_info)
+                tempo_feats.append(tempo_feats[-1])
                 continue
 
             file_path = self.files[idx]

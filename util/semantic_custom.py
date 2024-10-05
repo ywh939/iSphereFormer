@@ -28,6 +28,7 @@ class SemanticCustom(torch.utils.data.Dataset):
         pc_range=None, 
         use_tta=None,
         vote_num=4,
+        tempo_sample_num=1
     ):
         super().__init__()
         self.num_classes = 19
@@ -49,6 +50,8 @@ class SemanticCustom(torch.utils.data.Dataset):
         self.data_path = data_path
         self.use_tta = use_tta
         self.vote_num = vote_num
+
+        self.tempo_sample_num = tempo_sample_num
 
         if split == 'train':
             splits = semkittiyaml['split']['valid']
@@ -83,6 +86,44 @@ class SemanticCustom(torch.utils.data.Dataset):
                 samples.append(sample)
             return tuple(samples)
         return self.get_single_sample(index)
+    
+    def get_tempo_samples(self, index, cur_coords, cur_xyz, cur_feats, cur_labels):
+        cur_sample_info = {'index' : index, 
+                       'coords' : cur_coords, 
+                       'xyz' : cur_xyz, 
+                       'feats' : cur_feats, 
+                       'labels' : cur_labels}
+        
+        tempo_feats = [cur_sample_info]
+
+        for idx in range(index - 1, index - self.tempo_sample_num, -1):
+            if (idx < 0):
+                tempo_feats.append(tempo_feats[-1])
+                continue
+
+            file_path = self.files[idx]
+            raw_data = np.fromfile(file_path, dtype=np.float32).reshape((-1, 3))
+            p = np.ones(raw_data.shape[0]).reshape(-1, 1)
+            points = np.hstack((raw_data, p))
+            raw_data = points
+
+            annotated_data = np.fromfile(file_path[:-3] + 'label', dtype=np.uint32).reshape((-1, 1))
+            annotated_data = np.vectorize(self.learning_map.__getitem__)(annotated_data)
+            annotated_data = annotated_data - 1
+            labels_in = annotated_data.astype(np.uint8).reshape(-1)
+
+            sample_info = { 'index': idx }
+            if self.split == 'train':
+                t_coords, t_xyz, t_feats, t_labels = data_prepare(raw_data[:, :3], raw_data[:, :4], labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
+            else:
+                t_coords, t_xyz, t_feats, t_labels, _ = data_prepare(raw_data[:, :3], raw_data[:, :4], labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
+            sample_info['coords'] = t_coords
+            sample_info['xyz'] = t_xyz
+            sample_info['feats'] = t_feats
+            sample_info['labels'] = t_labels
+            tempo_feats.append(sample_info)
+
+        return tempo_feats
 
     def get_single_sample(self, index, vote_idx=0):
 
@@ -97,7 +138,7 @@ class SemanticCustom(torch.utils.data.Dataset):
         points = np.hstack((raw_data, p))
 
         if self.split != 'test':
-            annotated_data[annotated_data == 0] = self.ignore_label + 1
+            # annotated_data[annotated_data == 0] = self.ignore_label + 1
             annotated_data = annotated_data - 1
             labels_in = annotated_data.astype(np.uint8).reshape(-1)
         else:
@@ -145,7 +186,12 @@ class SemanticCustom(torch.utils.data.Dataset):
 
         if self.split == 'train':
             coords, xyz, feats, labels = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
-            return coords, xyz, feats, labels
+
+            if self.tempo_sample_num > 1:
+                tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
+                return coords, xyz, feats, labels, tempo_data
+            else:
+                return coords, xyz, feats, labels
         else:
             coords, xyz, feats, labels, inds_reconstruct = data_prepare(xyz, feats, labels_in, self.split, self.voxel_size, self.voxel_max, None, self.xyz_norm)
 
@@ -154,7 +200,11 @@ class SemanticCustom(torch.utils.data.Dataset):
             filep = str(filepath.parent)
 
             if self.split == 'val':
-                return coords, xyz, feats, labels, inds_reconstruct
+                if self.tempo_sample_num > 1:
+                    tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
+                    return coords, xyz, feats, labels, inds_reconstruct, tempo_data
+                else:
+                    return coords, xyz, feats, labels, inds_reconstruct
             elif self.split == 'test':
                 # return coords, xyz, feats, labels, inds_reconstruct, filename, self.files[index]
                 return coords, xyz, feats, labels, inds_reconstruct, filename

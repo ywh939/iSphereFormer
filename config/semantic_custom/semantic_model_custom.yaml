@@ -2,11 +2,11 @@ DATA:
   data_name: semantic_custom
   data_root: /root/datasets/semantic-seg ## Fill in the data path 
   label_mapping: util/semantic-custom.yaml
-  classes: 19
+  classes: 3
   fea_dim: 6
   voxel_size: [0.05, 0.05, 0.05]
   voxel_max: 120000 
-
+ 
 TRAIN:
   # arch
   arch: unet_spherical_transformer
@@ -25,9 +25,9 @@ TRAIN:
   rel_value: True
   drop_path_rate: 0.3
   max_batch_points: 1000000
-  class_weight: [ 3.1557,  8.7029,  7.8281,  6.1354,  6.3161,  7.9937,  8.9704,
-                          10.1922,  1.6155,  4.2187,  1.9385,  5.5455,  2.0198,  2.6261,  1.3212,
-                          5.1102,  2.5492,  5.8585,  7.3929]
+  # class_weight: [ 3.1557,  8.7029,  7.8281,  6.1354,  6.3161,  7.9937,  8.9704,
+  #                         10.1922,  1.6155,  4.2187,  1.9385,  5.5455,  2.0198,  2.6261,  1.3212,
+  #                         5.1102,  2.5492,  5.8585,  7.3929]
   xyz_norm: False
   pc_range: [[-51.2, -51.2, -4], [51.2, 51.2, 2.4]]
   window_size_sphere: [2, 2, 80]
@@ -36,9 +36,10 @@ TRAIN:
   grad_checkpoint_layers: []
   a: 0.0125
   loss_name: ce_loss
-  use_tta: True
-  # use_tta: False
+  # use_tta: True
+  use_tta: False
   vote_num: 4
+  tempo_sample_num: 2
 
   # training
   aug: True
@@ -53,7 +54,7 @@ TRAIN:
   batch_size: 8 # batch size for training
   batch_size_val: 1 # batch size for validation during training, memory and speed tradeoff
   base_lr: 0.006 
-  epochs: 50 
+  epochs: 20 
   start_epoch: 0
   momentum: 0.9
   weight_decay: 0.02 
@@ -63,16 +64,16 @@ TRAIN:
   manual_seed: 123
   print_freq: 10
   save_freq: 1
-  save_path: runs/semantic_custom
-  # weight:  # path to initial weight (default: none)
+  save_path: runs/semantic_custom_tempo_threeClasses
+  weight:  # path to initial weight (default: none)
   # weight:  /root/map-volume/model_semantic_kitti.pth
-  weight:  /root/iSphereFormer/runs/semantic_kitti_unet32_spherical_transformer/model/model_last.pth
+  # weight:  /root/iSphereFormer/runs/semantic_kitti_unet32_spherical_transformer/model/model_last.pth
   resume:  # path to latest checkpoint (default: none)
   evaluate: True  # evaluate on validation set, extra gpu memory needed and small batch_size_val is recommend
   eval_freq: 1
-  # val: False
-  val: True
-  test: True
+  val: False
+  # val: True
+  # test: True
   
 Distributed:
   dist_url: tcp://127.0.0.1:6789

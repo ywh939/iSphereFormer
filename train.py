@@ -269,11 +269,15 @@ def main_worker(gpu, ngpus_per_node, argss):
             split='train', 
             return_ref=True, 
             label_mapping=args.label_mapping, 
-            rotate_aug=True, 
-            flip_aug=True, 
-            scale_aug=True, 
+            rotate_aug=args.use_tta, 
+            flip_aug=args.use_tta, 
+            scale_aug=args.use_tta, 
+            transform_aug=args.use_tta, 
+            # rotate_aug=True, 
+            # flip_aug=True, 
+            # scale_aug=True, 
             scale_params=[0.95,1.05], 
-            transform_aug=True, 
+            # transform_aug=True, 
             trans_std=[0.1, 0.1, 0.1],
             ignore_label=args.ignore_label, 
             voxel_max=args.voxel_max, 
@@ -281,6 +285,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             pc_range=args.get("pc_range", None), 
             use_tta=args.use_tta,
             vote_num=args.vote_num,
+            tempo_sample_num=args.tempo_sample_num
         )
 
     elif args.data_name == 'waymo':
@@ -361,7 +366,7 @@ def main_worker(gpu, ngpus_per_node, argss):
         val_data = SemanticCustom(data_path=args.data_root,
             label_mapping=args.label_mapping,
             voxel_size=args.voxel_size, 
-            split='test' if args.test else 'val', 
+            split='val', 
             rotate_aug=args.use_tta, 
             flip_aug=args.use_tta, 
             scale_aug=args.use_tta, 
@@ -370,6 +375,7 @@ def main_worker(gpu, ngpus_per_node, argss):
             pc_range=args.get("pc_range", None), 
             use_tta=args.use_tta,
             vote_num=args.vote_num,
+            tempo_sample_num=args.tempo_sample_num
         )
     elif args.data_name == 'waymo':
         val_data = Waymo(data_path=args.data_root, 
@@ -445,8 +451,8 @@ def main_worker(gpu, ngpus_per_node, argss):
         if args.use_tta:
             validate_tta(val_loader, model, criterion, args)
         else:
-            validate(val_loader, model, criterion)
-            # validate_distance(val_loader, model, criterion)
+            # validate(val_loader, model, criterion)
+            validate_distance(val_loader, model, criterion)
         exit()
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -896,7 +902,10 @@ def validate_distance(val_loader, model, criterion):
 
         data_time.update(time.time() - end)
     
-        (coord, xyz, feat, target, offset, inds_reverse) = batch_data
+        if args.tempo_sample_num > 1:
+            (coord, xyz, feat, target, offset, inds_reverse, tempo_data) = batch_data
+        else:
+            (coord, xyz, feat, target, offset, inds_reverse) = batch_data
         inds_reverse = inds_reverse.cuda(non_blocking=True)
 
         offset_ = offset.clone()
@@ -911,10 +920,14 @@ def validate_distance(val_loader, model, criterion):
 
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size_val)
 
-        assert batch.shape[0] == feat.shape[0]
+        assert batch.shape[0] == feat.shape[0]        
+        pre_process_data(tempo_data)
         
         with torch.no_grad():
-            output = model(sinput, xyz, batch)
+            if args.tempo_sample_num > 1:
+                output = model(sinput, xyz, batch, tempo_data)
+            else:
+                output = model(sinput, xyz, batch)
             output = output[inds_reverse, :]
         
             if loss_name == 'focal_loss':
