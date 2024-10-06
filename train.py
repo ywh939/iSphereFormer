@@ -567,7 +567,8 @@ def train(train_loader, model, criterion, optimizer, epoch, scaler, scheduler, g
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size)
 
         assert batch.shape[0] == feat.shape[0]
-        pre_process_data(tempo_data=tempo_feats)
+        if args.tempo_sample_num > 1:
+            pre_process_data(tempo_data=tempo_feats)
         use_amp = args.use_amp
         with torch.cuda.amp.autocast(enabled=use_amp):
             # Trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -702,7 +703,8 @@ def validate(val_loader, model, criterion):
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size_val)
 
         assert batch.shape[0] == feat.shape[0]
-        pre_process_data(tempo_data)
+        if args.tempo_sample_num > 1:
+            pre_process_data(tempo_data)
         
         with torch.no_grad():
             if args.tempo_sample_num > 1:
@@ -921,7 +923,8 @@ def validate_distance(val_loader, model, criterion):
         sinput = spconv.SparseConvTensor(feat, coord.int(), spatial_shape, args.batch_size_val)
 
         assert batch.shape[0] == feat.shape[0]        
-        pre_process_data(tempo_data)
+        if args.tempo_sample_num > 1:
+            pre_process_data(tempo_data)
         
         with torch.no_grad():
             if args.tempo_sample_num > 1:
