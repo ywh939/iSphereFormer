@@ -40,7 +40,6 @@ networkx==3.2.1
 ninja==1.11.1.1
 numpy==1.26.4
 orderedmultidict==1.0.1
-packaging @ file:///croot/packaging_1720101850331/work
 pandas==2.2.2
 pccm==0.4.11
 pillow==10.3.0
@@ -63,7 +62,6 @@ scipy==1.13.1
 simplejson==3.19.2
 six==1.16.0
 spconv-cu116==2.3.6
-sptr==0.0.0
 SQLAlchemy==2.0.31
 tensorboard==2.17.0
 tensorboard-data-server==0.7.2
