@@ -451,8 +451,8 @@ def main_worker(gpu, ngpus_per_node, argss):
         if args.use_tta:
             validate_tta(val_loader, model, criterion, args)
         else:
-            # validate(val_loader, model, criterion)
-            validate_distance(val_loader, model, criterion)
+            validate(val_loader, model, criterion)
+            # validate_distance(val_loader, model, criterion)
         exit()
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -687,7 +687,7 @@ def validate(val_loader, model, criterion):
         if args.tempo_sample_num > 1:
             (coord, xyz, feat, target, offset, inds_reconstruct, tempo_data) = batch_data
         else:
-            (coord, xyz, feat, target, offset, inds_reconstruct) = batch_data
+            (coord, xyz, feat, target, offset, inds_reconstruct, filename) = batch_data
         inds_reconstruct = inds_reconstruct.cuda(non_blocking=True)
 
         offset_ = offset.clone()
@@ -712,6 +712,15 @@ def validate(val_loader, model, criterion):
             else:
                 output = model(sinput, xyz, batch)
             output = output[inds_reconstruct, :]
+            
+            if (args.save_model_output):
+                output_save_path = args.save_path + "/output/"
+                if not os.path.exists(output_save_path):
+                    os.makedirs(output_save_path)
+                output_save_path = output_save_path + filename[0] + '.pt'
+                torch.save(output, output_save_path)
+                logger.info(f'save to {output_save_path}')
+                continue
         
             if loss_name == 'focal_loss':
                 loss = focal_loss(output, target, criterion.weight, args.ignore_label, args.loss_gamma)
@@ -749,6 +758,11 @@ def validate(val_loader, model, criterion):
                                                           batch_time=batch_time,
                                                           loss_meter=loss_meter,
                                                           accuracy=accuracy))
+                
+    if (args.save_model_output):
+        import sys
+        logger.info("saved model output, now exit!!!!!")
+        sys.exit()
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)

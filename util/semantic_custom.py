@@ -204,7 +204,7 @@ class SemanticCustom(torch.utils.data.Dataset):
                     tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
                     return coords, xyz, feats, labels, inds_reconstruct, tempo_data
                 else:
-                    return coords, xyz, feats, labels, inds_reconstruct
+                    return coords, xyz, feats, labels, inds_reconstruct, filename
             elif self.split == 'test':
                 # return coords, xyz, feats, labels, inds_reconstruct, filename, self.files[index]
                 return coords, xyz, feats, labels, inds_reconstruct, filename

@@ -60,14 +60,3 @@ For validation, you need to modify the `.yaml` config file. (1) fill in the `wei
 ```
 python train.py --config [YOUR_CONFIG_PATH]
 ```
-# Citation
-If you find this project useful, please consider citing:
-
-```
-@inproceedings{lai2023spherical,
-  title={Spherical Transformer for LiDAR-based 3D Recognition},
-  author={Lai, Xin and Chen, Yukang and Lu, Fanbin and Liu, Jianhui and Jia, Jiaya},
-  booktitle={CVPR},
-  year={2023}
-}
-```
