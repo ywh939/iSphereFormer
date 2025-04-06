@@ -47,6 +47,18 @@ dataset/
 |------- 03/
 |------- .../
 ```
+### Custom
+Download the SemanticKIITI dataset from [here](https://github.com/ywh939/SemanticDatasetUtil). Unzip and arrange it as follows. Then fill in the `data_root` entry in the .yaml configuration file.
+```
+dataset/
+|--- sub1/
+|------- kitti_format/
+|---------- 000.bin
+|---------- 000.label
+|--- sub2/
+|------- kitti_format/
+|--- .../
+```
 
 ## Training
 
