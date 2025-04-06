@@ -63,9 +63,17 @@ dataset/
 ## Training
 
 ### SemanticKITTI
+Run in the background
 ```
-python train.py --config config/semantic_kitti/semantic_kitti_unet32_spherical_transformer.yaml
+./run_ddp_backstage.sh
 ```
+You can run `tail -f ddp_nohup.log` on Linux terminal to watch log of model's outputs.  
+
+Run in the terminal
+```
+CUDA_VISIBLE_DEVICES=0 python train.py --config ******.yaml
+```
+Or use vscode.
 
 ## Validation
 For validation, you need to modify the `.yaml` config file. (1) fill in the `weight` with the path of model weight (`.pth` file); (2) set `val` to `True`; (3) for testing-time augmentation, set `use_tta` to `True` and set `vote_num` accordingly. After that, run the following command. 
