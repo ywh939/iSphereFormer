@@ -80,7 +80,8 @@ class UBlock(nn.Module):
         grad_checkpoint_layers=[], 
         sphere_layers=[1,2,3,4,5],
         a=0.05*0.25,
-        open_tempo=False
+        open_tempo=False,
+        mamba_layers=1
     ):
 
         super().__init__()
@@ -102,7 +103,7 @@ class UBlock(nn.Module):
 
             if (open_tempo):
                 self.mamba_blocks = MixerModel(d_model=nPlanes[0],
-                                n_layer=1,
+                                n_layer=mamba_layers,
                                 # drop_path=0.1)
                                 drop_path=0.3)
             else:
@@ -166,7 +167,8 @@ class UBlock(nn.Module):
                 grad_checkpoint_layers=grad_checkpoint_layers, 
                 sphere_layers=sphere_layers,
                 a=a,
-                open_tempo=open_tempo
+                open_tempo=open_tempo,
+                mamba_layers=mamba_layers
             )
 
             self.deconv = spconv.SparseSequential(
@@ -239,7 +241,8 @@ class Semantic(nn.Module):
         grad_checkpoint_layers=[], 
         sphere_layers=[1,2,3,4,5],
         a=0.05*0.25,
-        open_tempo=False
+        open_tempo=False,
+        mamba_layers=1
     ):
         super().__init__()
 
@@ -261,7 +264,7 @@ class Semantic(nn.Module):
             nn.ReLU(),
         )
 
-        self.tempoEncoder = GatedTempoClueEncoder(input_channel=input_c, middle_channel=m)
+        # self.tempoEncoder = GatedTempoClueEncoder(input_channel=input_c, middle_channel=m)
 
         self.unet = UBlock(layers, 
             norm_fn, 
@@ -280,7 +283,8 @@ class Semantic(nn.Module):
             grad_checkpoint_layers=grad_checkpoint_layers, 
             sphere_layers=sphere_layers,
             a=a,
-            open_tempo=open_tempo
+            open_tempo=open_tempo,
+            mamba_layers=mamba_layers
         )
 
         self.output_layer = spconv.SparseSequential(
@@ -288,8 +292,12 @@ class Semantic(nn.Module):
             nn.ReLU()
         )
 
+        self.linear = nn.Sequential(nn.Linear(m, m), nn.ReLU(), nn.Dropout(p=0.5), 
+                                    nn.Linear(m, m), nn.ReLU(), nn.Dropout(p=0.5), 
+                                    nn.Linear(m, classes))
+
         #### semantic segmentation
-        self.linear = nn.Linear(m, classes) # bias(default): True
+        # self.linear = nn.Linear(m, classes) # bias(default): True
 
         self.apply(self.set_bn_init)
 

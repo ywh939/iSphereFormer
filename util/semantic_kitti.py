@@ -55,6 +55,7 @@ class SemanticKITTI(torch.utils.data.Dataset):
         with open(label_mapping, 'r') as stream:
             semkittiyaml = yaml.safe_load(stream)
         self.learning_map = semkittiyaml['learning_map']
+        self.learning_map_inv = semkittiyaml['learning_map_inv']
         self.return_ref = return_ref
         self.split = split
         self.rotate_aug = rotate_aug
@@ -158,10 +159,13 @@ class SemanticKITTI(torch.utils.data.Dataset):
         points = raw_data[:, :4]
 
         if self.split != 'test':
-            # annotated_data[annotated_data == 0] = self.ignore_label + 1
+            annotated_data[annotated_data == 0] = self.ignore_label + 1
             annotated_data = annotated_data - 1
             labels_in = annotated_data.astype(np.uint8).reshape(-1)
         else:
+            # annotated_data[annotated_data == 0] = self.ignore_label + 1
+            # annotated_data = annotated_data - 1
+            # labels_in = annotated_data.astype(np.uint8).reshape(-1)
             labels_in = np.zeros(points.shape[0]).astype(np.uint8)
 
         # Augmentation
@@ -223,6 +227,6 @@ class SemanticKITTI(torch.utils.data.Dataset):
                     tempo_data = self.get_tempo_samples(index, coords, xyz, feats, labels)
                     return coords, xyz, feats, labels, inds_reconstruct, tempo_data
                 else:
-                    return coords, xyz, feats, labels, inds_reconstruct
+                    return coords, xyz, feats, labels, inds_reconstruct, self.files[index]
             elif self.split == 'test':
                 return coords, xyz, feats, labels, inds_reconstruct, self.files[index]

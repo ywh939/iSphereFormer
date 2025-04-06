@@ -119,7 +119,7 @@ def collation_fn_voxelmean_tta(batch_list):
     batch_list = list(zip(*batch_list))
 
     for batch in batch_list:
-        coords, xyz, feats, labels, inds_recons = list(zip(*batch))
+        coords, xyz, feats, labels, inds_recons, filename = list(zip(*batch))
         inds_recons = list(inds_recons)
 
         accmulate_points_num = 0
@@ -136,7 +136,7 @@ def collation_fn_voxelmean_tta(batch_list):
         offset = torch.IntTensor(offset)
         inds_recons = torch.cat(inds_recons)
 
-        sample = (coords, xyz, feats, labels, offset, inds_recons)
+        sample = (coords, xyz, feats, labels, offset, inds_recons, filename)
         samples.append(sample)
 
     return samples
